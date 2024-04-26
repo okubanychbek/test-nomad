@@ -1,22 +1,42 @@
+FROM php:8.3-apache
 
-FROM php:8.2-apache
+# Install required dependencies
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    unixodbc-dev \
+    dnsutils librsvg2-bin fswatch ffmpeg nano \
+    g++ \
+    curl \
+    gnupg \
+    openssl libssl-dev \
+ && rm -rf /var/lib/apt/lists/*
 
-RUN apt-get update && \
-    apt-get install -y libpng-dev libjpeg-dev libfreetype6-dev zip unzip && \
-    docker-php-ext-configure gd --with-freetype --with-jpeg && \
-    docker-php-ext-install gd pdo pdo_mysql && \
-    a2enmod rewrite
+# Set OpenSSL to use TLS 1.2
+RUN sed -i 's/DEFAULT@SECLEVEL=2/DEFAULT@SECLEVEL=1/' /etc/ssl/openssl.cnf
 
-RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
 
-WORKDIR /var/www/html
+# Install Microsoft ODBC Driver for SQL Server
+RUN curl -sS https://packages.microsoft.com/keys/microsoft.asc | apt-key add - \
+ && curl -sS https://packages.microsoft.com/config/ubuntu/22.04/prod.list > /etc/apt/sources.list.d/mssql-release.list
 
-COPY . .
+# Update package lists and install msodbcsql18
+RUN apt-get update \
+ && ACCEPT_EULA=Y apt-get install -y msodbcsql18
+RUN docker-php-ext-install mysqli pdo pdo_mysql && docker-php-ext-enable pdo_mysql
 
-RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
+# Install SQLSRV and PDO_SQLSRV PHP extensions
+RUN pecl install sqlsrv pdo_sqlsrv \
+ && echo "extension=pdo_sqlsrv.so" > /usr/local/etc/php/conf.d/30-pdo_sqlsrv.ini \
+ && echo "extension=sqlsrv.so" > /usr/local/etc/php/conf.d/20-sqlsrv.ini
 
-RUN composer install
+# Enable Apache modules
+RUN a2enmod rewrite
 
-EXPOSE 8000
+# Copy your Laravel project files into the container
+COPY . /var/www/html/
 
-CMD php artisan serve --host=0.0.0.0 --port=8000
+# Change ownership of the web root
+RUN chown -R www-data:www-data /var/www/html/
+
+# Expose port 80
+EXPOSE 80
